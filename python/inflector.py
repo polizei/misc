@@ -1,6 +1,6 @@
 # encoding: utf-8
 
-from re import match as rmatch, sub as rsub, I
+from re import search as rsearch, sub as rsub, I
 
 class Inflector:
 	'''Inflector for common english words and other text-transformation functions, such as underscore/camelize'''
@@ -111,7 +111,7 @@ class Inflector:
 			key = cls._singular[x][0]
 			value = cls._singular[x][1]
 
-			if rmatch(key, what, I):
+			if rsearch(key, what, I):
 				return rsub(key, value, what, I)
 
 		return what
@@ -137,7 +137,7 @@ class Inflector:
 			key = cls._plural[x][0]
 			value = cls._plural[x][1]
 
-			if rmatch(key, what, I):
+			if rsearch(key, what, I):
 				return rsub(key, value, what, I)
 
 		return what
