@@ -1,4 +1,5 @@
 # encoding: utf-8
+# vim: ts=4 noexpandtab
 
 from re import search as rsearch, sub as rsub, I
 
