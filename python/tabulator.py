@@ -37,7 +37,7 @@ class Tabulator:
 				except:
 					v = ''
 
-				l = max(l, len(v))
+				l = max(l, len(str(v)))
 
 			lengths.append(l)
 
@@ -70,7 +70,7 @@ class Tabulator:
 			for y in range(0, len(self.columns)):
 				try:
 
-					exec 'v = self.data[x].' + self.columns[y]
+					exec 'v = str(self.data[x].' + self.columns[y] + ')'
 				except:
 					v = ''
 
