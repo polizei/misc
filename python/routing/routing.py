@@ -7,61 +7,60 @@ from utils import singleton
 
 @singleton
 class Mapper:
-    args = ['controller', 'action', 'id', 'lang']
-    names = []
-    routes = []
+    _args = ['controller', 'action', 'id', 'lang']
+    _names = []
+    _routes = []
 
     def connect(self, route, map=None, **args):
         route = Route(route, map, **args)
-        self.names.append(route.name)
-        self.routes.append(route)
+        self._names.append(route.name())
+        self._routes.append(route)
 
 class Route:
-    name = None
-    route = None
-    map = None
-    regex = None
-    code = None
-    defaults = {}
-    constraints = {}
-    formats = {}
-    limits = {}
-    parameters = []
-    required = []
-    multiple = []
-
+    _name = None
+    _route = None
+    _map = None
+    _regex = None
+    _code = None
+    _defaults = {}
+    _constraints = {}
+    _formats = {}
+    _limits = {}
+    _parameters = []
+    _required = []
+    _multiple = []
 
     def __init__(self, route, map=None, **args):
-        self.route = route
+        self._route = route
 
         # map ourself out
         if map is not None:
             if type(map) == dict:
-                self.map = map
+                self._map = map
             elif type(map) == str:
-                self.map = dict(zip(Mapper().args[:map.count('#') + 1], map.split('#')))
+                self._map = dict(zip(Mapper().args[:map.count('#') + 1], map.split('#')))
             else:
                 raise TypeError('map should be either dict or str')
         else:
-            self.map = {}
+            self._map = {}
 
         # set/generate name
         if 'name' in args:
-            self.name = name
-        elif self.map:
-            self.name = '_'.join(self.map.keys())
+            self._name = name
+        elif self._map:
+            self._name = '_'.join(self._map.keys())
         else:
-            self.name = id(self)
+            self._name = id(self)
 
         # set common options
         if 'defaults' in args:
-            self.defaults = args['defaults']
+            self._defaults = args['defaults']
         if 'constraints' in args:
-            self.constraints = args['constraints']
+            self._constraints = args['constraints']
         if 'formats' in args:
-            self.formats = args['formats']
+            self._formats = args['formats']
         if 'limits' in args:
-            self.limits = args['limits']
+            self._limits = args['limits']
 
         # scan parameter names and parameter types (optional/required, single/multiple)
         l = len(route)
@@ -81,27 +80,52 @@ class Route:
                     x += 1
                 name = ''.join(name)
 
-                self.parameters.append(name)
+                self._parameters.append(name)
 
                 if not paren:
-                    self.required.append(name)
+                    self._required.append(name)
 
                 if c == '*':
-                    self.multiple.append(name)
+                    self._multiple.append(name)
 
         # set defaults for action and format
-        if 'action' in self.parameters and not 'action' in self.defaults:
-            self.defaults['action'] = 'index'
-        if 'format' in self.parameters and not 'format' in self.defaults:
-            self.defaults['format'] = 'html'
+        if 'action' in self._parameters and not 'action' in self._defaults:
+            self._defaults['action'] = 'index'
+        if 'format' in self._parameters and not 'format' in self._defaults:
+            self._defaults['format'] = 'html'
 
         # build the regular expression with a regular expression (and a couple of string substitutions, though)
-        self.regex = rsub('[:*](\\w+)', self._constraintize, route.replace('(', '(?:').replace(')', ')?').replace('.', '\\.'))
+        self._regex = rsub('[:*](\\w+)', self._constraintize, route.replace('(', '(?:').replace(')', ')?').replace('.', '\\.'))
 
         expr = nestedExpr('(', ')')
         parsed = expr.parseString('(' + route + ')')[0]
-        self.code = 'return ' + self._conditionalize(parsed)
-        print self.code
+        self._code = 'return ' + self._conditionalize(parsed)
+
+    def name(self):
+        return self._name
+
+    def _constraintize(self, match):
+        name = match.group(1)
+
+        if name in self._multiple:
+            if name in self._constraints:
+                constraint = self._constraints[name]
+            else:
+                constraint = '[^/]+'
+
+            if name in self._limits:
+                limit = ''.join(['{', self._limits[name], '}'])
+            else:
+                limit = '+'
+
+            return ''.join(['(?P<', name, '>(?:', constraint, '/?)', limit, ')'])
+
+        if name in self._constraints:
+            constraint = self._constraints[name]
+        else:
+            constraint = '[^/.]+'
+
+        return ''.join(['(?P<', name, '>', constraint, ')'])
 
     def _conditionalize(self, args):
         part = args[0]
@@ -109,7 +133,6 @@ class Route:
         next = []
         segments = args[1:]
         for segment in segments:
-            print segment
             next.append(self._conditionalize(segment))
         next = ' + '.join(next)
         if next:
@@ -125,25 +148,5 @@ class Route:
 
         return '((' + conditions + ') and ("' + rsub('[:*](\\w+)', '" + parameters["\\1"] + "', part) + '"' + next + ') or "")'
 
-    def _constraintize(self, match):
-        name = match.group(1)
-
-        if name in self.multiple:
-            if name in self.constraints:
-                constraint = self.constraints[name]
-            else:
-                constraint = '[^/]+'
-
-            if name in self.limits:
-                limit = ''.join(['{', self.limits[name], '}'])
-            else:
-                limit = '+'
-
-            return ''.join(['(?P<', name, '>(?:', constraint, '/?)', limit, ')'])
-
-        if name in self.constraints:
-            constraint = self.constraints[name]
-        else:
-            constraint = '[^/.]+'
-
-        return ''.join(['(?P<', name, '>', constraint, ')'])
+    def urlize(self, **args):
+        exec self._code
