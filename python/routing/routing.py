@@ -2,19 +2,76 @@
 # vim: ts=4 noexpandtab
 
 from re import sub as rsub, match as rmatch, search as rsearch, findall as rfind
+from urllib import urlencode
 from pyparsing import nestedExpr
-from utils import singleton
+
+
+def singleton(klass):
+    instances = {}
+
+    def get_instance():
+        if not klass in instances:
+            instances[klass] = klass()
+
+        return instances[klass]
+
+    return get_instance
+
+
+
+
 
 @singleton
 class Mapper:
-    _args = ['controller', 'action', 'id', 'lang']
+    _root = None
+    _error = None
+
     _names = []
     _routes = []
 
-    def connect(self, route, map=None, **args):
-        route = Route(route, map, **args)
+    def root(self, **kwargs):
+        if kwargs:
+            self._root = kwargs
+        return self._root
+
+    def error(self, **kwargs):
+        if kwargs:
+            self._error = kwargs
+        return self._error
+
+    def connect(self, route, map=None, **kwargs):
+        route = Route(route, map, **kwargs)
         self._names.append(route.name())
         self._routes.append(route)
+
+    def parameterize(self, url):
+        # try to find a suitable one
+        for route in self._routes:
+            parameters = route.parameterize(url)
+            if parameters:
+                return parameters
+
+        # 404
+        return self._error
+
+    def urlize(self, route=None, **kwargs):
+        # if urlizing a named route
+        if route:
+            return self._routes[self._names.index(route)].urlize(**kwargs)
+
+        # if it's the root route
+        if kwargs == dict([ (key, kwargs[key]) for key in self._root if key in kwargs ]):
+            return '/'
+
+        # try to find suitable one
+        for route in self._routes:
+            url = route.urlize(**kwargs)
+            if url:
+                return url
+
+        # bail out
+        raise Exception('No route found to generate url')
+
 
 class Route:
     _name = None
@@ -97,12 +154,48 @@ class Route:
         # build the regular expression with a regular expression (and a couple of string substitutions, though)
         self._regex = rsub('[:*](\\w+)', self._constraintize, route.replace('(', '(?:').replace(')', ')?').replace('.', '\\.'))
 
+        # build the evaluated urlize code with nested expression and a couple of regular expression substitutions
         expr = nestedExpr('(', ')')
-        parsed = expr.parseString('(' + route + ')')[0]
-        self._code = 'return ' + self._conditionalize(parsed)
+        parsed = expr.parseString(''.join(['(', route, ')']))[0]
+        self._code = ''.join(['result = ', self._conditionalize(parsed).replace(', ""', '')])
 
     def name(self):
         return self._name
+
+    def parameterize(self, url):
+        match = rmatch(self._regex, url)
+        if match:
+            return match.groupdict()
+
+    def urlize(self, **parameters):
+        # merge required parameters default values if not present
+        parameters.update(dict([ (key, self._defaults[key]) for key in self._defaults if key in self._required and key not in parameters ]))
+
+        # check mapping
+        if self._map and self._map != dict([ (key, parameters[key]) for key in self._map if key in parameters ]):
+            return None
+
+        # check required parameters
+        if len([ key for key in self._required if key in parameters ]) < len(self._required):
+            return None
+
+        # format values
+        for key in parameters:
+            if type(parameters[key]) == list:
+                if key in self._formats:
+                    parameters[key] = [ self._formats[key] % (part) for part in parameters[key] ]
+
+                parameters[key] = '/'.join(parameters[key])
+            elif key in self._formats:
+                parameters[key] = self._formats[key] % parameters[key]
+
+        # do some evil
+        exec self._code
+
+        # check optional query parameters
+        query = dict([ (key, parameters[key]) for key in parameters if key not in self._parameters ])
+
+        return ''.join([result, query and '?' or '', query and urlencode(query) or ''])
 
     def _constraintize(self, match):
         name = match.group(1)
@@ -134,19 +227,16 @@ class Route:
         segments = args[1:]
         for segment in segments:
             next.append(self._conditionalize(segment))
-        next = ' + '.join(next)
+        next = ', '.join(next)
         if next:
-            next = ' + ' + next;
+            next = ''.join([', ', next]);
 
         conditions = []
         for name in rfind('[:*](\\w+)', part):
-            conditions.append('"' + name + '" in parameters')
+            conditions.append(''.join(['"', name, '" in parameters']))
         if conditions:
             conditions = ' and '.join(conditions)
         else:
             conditions = 'true'
 
-        return '((' + conditions + ') and ("' + rsub('[:*](\\w+)', '" + parameters["\\1"] + "', part) + '"' + next + ') or "")'
-
-    def urlize(self, **args):
-        exec self._code
+        return ''.join(['((', conditions, ') and "".join(["', rsub('[:*](\\w+)', '", parameters["\\1"], "', part), '"', next, ']) or "")'])
