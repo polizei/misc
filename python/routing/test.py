@@ -3,16 +3,15 @@
 # vim: ts=4 noexpandtab
 
 from __future__ import print_function
-from routing import Mapper
+from routing import Mapper as m
 
-map = Mapper()
+m.root(controller='home', action='index')
+m.connect('/whatever/suites/best.:format', controller='whatever', action='fuck', id=123)
+m.connect('/:controller(/:action(/:id)(.:format))', defaults=dict(action='index', format='html'))
 
-map.root(controller='home', action='index')
-map.connect('/whatever/suites/best.:format', map=dict(controller='whatever', action='fuck', id='123'))
-map.connect('/:controller(/:action(/:id)(.:format))', defaults=dict(action='index', format='html'))
+#print(m.parameterize('/foo/bar/123.js'))
+#print()
 
-print(map.parameterize('/foo/bar/123.js'))
-print()
-
-print(map.urlize(controller='home', action='index'))
-print(map.urlize(controller='news', action='view', id='123', format='xml', cache='0'))
+print(m.urlize(controller='home', action='index', lang='en'))
+print(m.urlize(controller='whatever', action='fuck', id=123, format='xml'))
+print(m.urlize(controller='whatever', action='fuck', id=456, format='xml'))

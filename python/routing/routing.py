@@ -1,27 +1,18 @@
 # encoding: utf-8
 # vim: ts=4 noexpandtab
 
-from re import sub as rsub, match as rmatch, search as rsearch, findall as rfind
+from re import sub as rsub, match as rmatch, findall as rfind
 from urllib import urlencode
 from pyparsing import nestedExpr
 
 
-def singleton(klass):
-    instances = {}
+def build_query(**args):
+    if args:
+        return ''.join(['?', urlencode(args)])
 
-    def get_instance():
-        if not klass in instances:
-            instances[klass] = klass()
-
-        return instances[klass]
-
-    return get_instance
+    return ''
 
 
-
-
-
-@singleton
 class Mapper:
     _root = None
     _error = None
@@ -29,42 +20,48 @@ class Mapper:
     _names = []
     _routes = []
 
-    def root(self, **kwargs):
+    @classmethod
+    def root(cls, **kwargs):
         if kwargs:
-            self._root = kwargs
-        return self._root
+            cls._root = kwargs
+        return cls._root
 
-    def error(self, **kwargs):
+    @classmethod
+    def error(cls, **kwargs):
         if kwargs:
-            self._error = kwargs
-        return self._error
+            cls._error = kwargs
+        return cls._error
 
-    def connect(self, route, map=None, **kwargs):
-        route = Route(route, map, **kwargs)
-        self._names.append(route.name())
-        self._routes.append(route)
+    @classmethod
+    def connect(cls, route, **kwargs):
+        route = Route(route, **kwargs)
+        cls._names.append(route._name)
+        cls._routes.append(route)
 
-    def parameterize(self, url):
+    @classmethod
+    def parameterize(cls, url):
         # try to find a suitable one
-        for route in self._routes:
+        for route in cls._routes:
             parameters = route.parameterize(url)
             if parameters:
                 return parameters
 
-        # 404
-        return self._error
+        # 404 perhaps
+        return cls._error
 
-    def urlize(self, route=None, **kwargs):
+    @classmethod
+    def urlize(cls, **kwargs):
         # if urlizing a named route
-        if route:
-            return self._routes[self._names.index(route)].urlize(**kwargs)
+        if 'route' in kwargs:
+            route = kwargs.pop('route')
+            return cls._routes[cls._names.index(route)].urlize(**kwargs)
 
         # if it's the root route
-        if kwargs == dict([ (key, kwargs[key]) for key in self._root if key in kwargs ]):
-            return '/'
+        if dict([(key, kwargs[key]) for key in cls._root if key in kwargs]) == cls._root:
+            return ''.join(['/', build_query(**dict([(key, kwargs[key]) for key in kwargs if key not in cls._root]))])
 
         # try to find suitable one
-        for route in self._routes:
+        for route in cls._routes:
             url = route.urlize(**kwargs)
             if url:
                 return url
@@ -87,37 +84,35 @@ class Route:
     _required = []
     _multiple = []
 
-    def __init__(self, route, map=None, **args):
+    def __init__(self, route, **kwargs):
         self._route = route
 
-        # map ourself out
-        if map is not None:
-            if type(map) == dict:
-                self._map = map
-            elif type(map) == str:
-                self._map = dict(zip(Mapper().args[:map.count('#') + 1], map.split('#')))
-            else:
-                raise TypeError('map should be either dict or str')
-        else:
-            self._map = {}
-
         # set/generate name
-        if 'name' in args:
-            self._name = name
-        elif self._map:
-            self._name = '_'.join(self._map.keys())
-        else:
-            self._name = id(self)
+        if 'name' in kwargs:
+            self._name = kwargs.pop('name')
 
         # set common options
-        if 'defaults' in args:
-            self._defaults = args['defaults']
-        if 'constraints' in args:
-            self._constraints = args['constraints']
-        if 'formats' in args:
-            self._formats = args['formats']
-        if 'limits' in args:
-            self._limits = args['limits']
+        if 'defaults' in kwargs:
+            self._defaults = kwargs.pop('defaults')
+        if 'constraints' in kwargs:
+            self._constraints = kwargs.pop('constraints')
+        if 'formats' in kwargs:
+            self._formats = kwargs.pop('formats')
+        if 'limits' in kwargs:
+            self._limits = kwargs('limits')
+
+        # everything else should be map then, unless we hav a map argument passed
+        if 'map' in kwargs:
+            self._map = kwargs.pop('map')
+        else:
+            self._map = kwargs
+
+        # check name once again and try to set it against map
+        if not self._name:
+            if self._map:
+                self._name = '_'.join([str(value) for value in self._map.values()])
+            else:
+                self._name = id(self)
 
         # scan parameter names and parameter types (optional/required, single/multiple)
         l = len(route)
@@ -159,9 +154,6 @@ class Route:
         parsed = expr.parseString(''.join(['(', route, ')']))[0]
         self._code = ''.join(['result = ', self._conditionalize(parsed).replace(', ""', '')])
 
-    def name(self):
-        return self._name
-
     def parameterize(self, url):
         match = rmatch(self._regex, url)
         if match:
@@ -169,33 +161,32 @@ class Route:
 
     def urlize(self, **parameters):
         # merge required parameters default values if not present
-        parameters.update(dict([ (key, self._defaults[key]) for key in self._defaults if key in self._required and key not in parameters ]))
+        parameters.update(dict([(key, self._defaults[key]) for key in self._defaults if key in self._required and key not in parameters]))
 
         # check mapping
-        if self._map and self._map != dict([ (key, parameters[key]) for key in self._map if key in parameters ]):
+        if self._map and self._map != dict([(key, parameters[key]) for key in parameters if key in self._map]):
             return None
 
         # check required parameters
-        if len([ key for key in self._required if key in parameters ]) < len(self._required):
+        if len([key for key in self._required if key in parameters]) < len(self._required):
             return None
 
         # format values
         for key in parameters:
             if type(parameters[key]) == list:
                 if key in self._formats:
-                    parameters[key] = [ self._formats[key] % (part) for part in parameters[key] ]
+                    parameters[key] = [self._formats[key] % (part) for part in parameters[key]]
 
                 parameters[key] = '/'.join(parameters[key])
             elif key in self._formats:
                 parameters[key] = self._formats[key] % parameters[key]
+            else:
+                parameters[key] = str(parameters[key])
 
         # do some evil
         exec self._code
 
-        # check optional query parameters
-        query = dict([ (key, parameters[key]) for key in parameters if key not in self._parameters ])
-
-        return ''.join([result, query and '?' or '', query and urlencode(query) or ''])
+        return ''.join([result, build_query(**dict([(key, parameters[key]) for key in parameters if key not in self._parameters]))])
 
     def _constraintize(self, match):
         name = match.group(1)
